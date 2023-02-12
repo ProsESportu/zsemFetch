@@ -2,9 +2,9 @@ import * as admin from "firebase-admin";
 
 import * as functions from "firebase-functions";
 import * as cheerio from "cheerio";
-
 admin.initializeApp();
 const db = admin.firestore();
+const config: functions.RuntimeOptions = { memory: "128MB", timeoutSeconds: 24, failurePolicy: true };
 
 // // Start writing functions
 // // https://firebase.google.com/docs/functions/typescript
@@ -12,13 +12,12 @@ const db = admin.firestore();
 
 export const ZsemPlan = functions
     .region("europe-central2")
-    .runWith({ memory: "128MB", timeoutSeconds: 24, failurePolicy: true })
-
+    .runWith(config)
     .pubsub
     .schedule("0 23,7,16 * * 1-5")
     .timeZone("Europe/Warsaw")
     .onRun((_ctx) => {
-        return fetch("https://zsem.edu.pl/plany/plany/o21.html")
+        fetch("https://zsem.edu.pl/plany/plany/o21.html")
             .then(async (res) => {
                 if (res.ok) {
                     const text = await res.text();
@@ -74,22 +73,117 @@ export const ZsemPlan = functions
                     }))
                     timeTable.splice(0, 2)
                     db.collection("TimeTableData").add({ timeTable: JSON.stringify(timeTable), createdAt: new Date() })
-                    return true
+
                 } else {
                     functions.logger.warn(res.status, res.statusText)
-                    return false
+
                 }
             })
             .catch(
                 (e) => {
                     functions.logger.error(e)
-                    return false
+
                 }
 
-            );
+            )
+        return
     },
     );
 
+export const substitutionFetch = functions
+    .region("europe-central2")
+    .runWith(config)
+    .pubsub
+    .schedule("0 23,7,16 * * 1-5")
+    .timeZone("Europe/Warsaw")
+    .onRun(
+        (_ctx) => {
+            const headers = new Headers()
+            headers.append("Authorization", "Basic " + Buffer.from("zsem:123456").toString("base64"))
+            const now = new Date()
+            for (let i = 0; i < 7; i++) {
+                const address = `https://zsem.edu.pl/zastepstwa/${(now.getDate() + i).toString().padStart(2, "0")}${(now.getMonth() + 1).toString().padStart(2, "0")}${now.getFullYear()}.html`
+                fetch(address,
+                    { headers })
+                    .then(async res => {
+                        if (res.ok && res.url == address) {
+                            const result: subtitution[] = []
+                            const text = await res.text()
+                            const $ = cheerio.load(text)
+                            const table = $("table")
+                            const rows = table.find("tr")
+                            rows.slice(0, 2).remove()
+                            rows.each((i, e) => {
+                                const cells = $(e).find("td")
+                                result.push({
+                                    nr: cells.eq(0).text(),
+                                    teacher: cells.eq(1).text(),
+                                    class: cells.eq(2).text(),
+                                    subject: cells.eq(3).text(),
+                                    room: cells.eq(4).text(),
+                                    subctitute: cells.eq(5).text(),
+                                    reason: cells.eq(6).text(),
+                                    notes: cells.eq(7).text()
+                                })
+
+                            })
+                            result.splice(0, 2)
+                            db.collection("subtitutions").add({ result, createdAt: now, address })
+
+                            //response.send(result)
+                        }
+                        else {
+                            functions.logger.warn(res.status, res.statusText)
+                        }
+
+                    }).catch(e => {
+                        functions.logger.error(e)
+                    })
+            }
+            return
+        }
+    )
+export const idsFetch = functions
+    .region("europe-central2")
+    .runWith(config)
+    .pubsub
+    .schedule("0 23 * * 1-5")
+    .timeZone("Europe/Warsaw")
+    .onRun(
+        async (_ctx) => {
+
+            const urls = []
+            for (let i = 1; i < 100; i++) {
+                urls.push(`https://zsem.edu.pl/plany/plany/n${i}.html`)
+            }
+            const result:(teacher|undefined)[] = await Promise.all(urls.map(e => fetchTeachers(e)))
+            db.collection("teachers").add({ result, createdAt: new Date() })
+
+        }
+    )
+
+export const firestoreClear = functions
+    .region("europe-central2")
+    .runWith(config)
+    .pubsub
+    .schedule("0 0 * * 1-5")
+    .timeZone("Europe/Warsaw")
+    .onRun(
+        (_ctx) => {
+            Promise.all([
+                cleanCollection("TimeTableData"),
+                cleanCollection("subtitutions"),
+                cleanCollection("teachers")
+            ])
+            return
+        }
+    )
+
+interface teacher {
+    id: string;
+    name: string;
+    short: string;
+}
 interface fullLesson {
     lesson: string;
     teacher: {
@@ -101,3 +195,41 @@ interface fullLesson {
         short: string;
     };
 }
+interface subtitution {
+    nr: string;
+    teacher: string;
+    class: string;
+    subject: string;
+    room: string;
+    subctitute: string;
+    reason: string;
+    notes: string;
+}
+
+async function fetchTeachers(url: string) {
+    const res = await fetch(url);
+    if (res.ok) {
+        const $ = cheerio.load(await res.text());
+        const text = $(".tytulnapis").text().split(" ");
+        return {
+            id: url?.substring(32) || "",
+            name: text[0] || "",
+            short: text[1]?.substring(1, 2) || ""
+        };
+    }
+    return;
+}
+
+async function cleanCollection(collection: string) {
+    const docRef = await db.collection(collection).orderBy("createdAt", "desc").limit(1).get();
+    if (docRef.docs.length == 1) {
+        let createdAt: admin.firestore.Timestamp = docRef.docs[0].get("createdAt");
+        const docsToDelete = await db.collection(collection).where("createdAt", "<", createdAt).get();
+        docsToDelete.forEach(e => e.ref.delete());
+        functions.logger.info(docsToDelete);
+    }
+    else {
+        functions.logger.error("nothing to clear");
+    }
+}
+
