@@ -158,7 +158,7 @@ export const idsFetch = functions
             }
             const result:(teacher|undefined)[] = await Promise.all(urls.map(e => fetchTeachers(e)))
             db.collection("teachers").add({ result, createdAt: new Date() })
-
+            return true
         }
     )
 
@@ -175,7 +175,7 @@ export const firestoreClear = functions
                 cleanCollection("subtitutions"),
                 cleanCollection("teachers")
             ])
-            return
+            return true
         }
     )
 
