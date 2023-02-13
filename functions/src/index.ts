@@ -1,17 +1,16 @@
-import * as admin from "firebase-admin";
-
-import * as functions from "firebase-functions";
-import * as cheerio from "cheerio";
-admin.initializeApp();
-const db = admin.firestore();
-const config: functions.RuntimeOptions = { memory: "128MB", timeoutSeconds: 24, failurePolicy: true };
+import { initializeApp } from "firebase-admin";
+import { getFirestore, Timestamp } from "firebase-admin/firestore";
+import { RuntimeOptions, region, logger } from "firebase-functions/v1";
+import { load } from "cheerio";
+const app = initializeApp();
+const db = getFirestore(app);
+const config: RuntimeOptions = { memory: "128MB", timeoutSeconds: 24, failurePolicy: true };
 
 // // Start writing functions
 // // https://firebase.google.com/docs/functions/typescript
 //
 
-export const ZsemPlan = functions
-    .region("europe-central2")
+export const ZsemPlan = region("europe-central2")
     .runWith(config)
     .pubsub
     .schedule("0 23,7,16 * * 1-5")
@@ -21,7 +20,7 @@ export const ZsemPlan = functions
             .then(async (res) => {
                 if (res.ok) {
                     const text = await res.text();
-                    const $ = cheerio.load(text);
+                    const $ = load(text);
                     const table = $("table.tabela")
                     const rows = table.find("tr")
                     const columns: fullLesson[][][] = []
@@ -75,13 +74,13 @@ export const ZsemPlan = functions
                     db.collection("TimeTableData").add({ timeTable: JSON.stringify(timeTable), createdAt: new Date() })
 
                 } else {
-                    functions.logger.warn(res.status, res.statusText,await res.text())
+                    logger.warn(res.status, res.statusText, await res.text())
 
                 }
             })
             .catch(
                 (e) => {
-                    functions.logger.error(e)
+                    logger.error(e)
 
                 }
 
@@ -90,8 +89,7 @@ export const ZsemPlan = functions
     },
     );
 
-export const substitutionFetch = functions
-    .region("europe-central2")
+export const substitutionFetch = region("europe-central2")
     .runWith(config)
     .pubsub
     .schedule("0 23,7,16 * * 1-5")
@@ -102,14 +100,15 @@ export const substitutionFetch = functions
             headers.append("Authorization", "Basic " + Buffer.from("zsem:123456").toString("base64"))
             const now = new Date()
             for (let i = 0; i < 7; i++) {
-                const address = `https://zsem.edu.pl/zastepstwa/${(now.getDate() + i).toString().padStart(2, "0")}${(now.getMonth() + 1).toString().padStart(2, "0")}${now.getFullYear()}.html`
+                const substitutionId = (now.getDate() + i).toString().padStart(2, "0") + (now.getMonth() + 1).toString().padStart(2, "0") + now.getFullYear();
+                const address = `https://zsem.edu.pl/zastepstwa/${substitutionId}.html`
                 fetch(address,
                     { headers })
                     .then(async res => {
                         if (res.ok && res.url == address) {
                             const result: subtitution[] = []
                             const text = await res.text()
-                            const $ = cheerio.load(text)
+                            const $ = load(text)
                             const table = $("table")
                             const rows = table.find("tr")
                             rows.slice(0, 2).remove()
@@ -133,18 +132,17 @@ export const substitutionFetch = functions
                             //response.send(result)
                         }
                         else {
-                            functions.logger.warn(res.status, res.statusText,await res.text())
+                            logger.warn(res.status, res.statusText, await res.text())
                         }
 
                     }).catch(e => {
-                        functions.logger.error(e)
+                        logger.error(e)
                     })
             }
             return true
         }
     )
-export const idsFetch = functions
-    .region("europe-central2")
+export const idsFetch = region("europe-central2")
     .runWith(config)
     .pubsub
     .schedule("0 23 * * 1-5")
@@ -156,14 +154,13 @@ export const idsFetch = functions
             for (let i = 1; i < 100; i++) {
                 urls.push(`https://zsem.edu.pl/plany/plany/n${i}.html`)
             }
-            const result:(teacher|undefined)[] = await Promise.all(urls.map(e => fetchTeachers(e)))
+            const result: (teacher | undefined)[] = await Promise.all(urls.map(e => fetchTeachers(e)))
             db.collection("teachers").add({ result, createdAt: new Date() })
             return true
         }
     )
 
-export const firestoreClear = functions
-    .region("europe-central2")
+export const firestoreClear = region("europe-central2")
     .runWith(config)
     .pubsub
     .schedule("0 0 * * 1-5")
@@ -209,7 +206,7 @@ interface subtitution {
 async function fetchTeachers(url: string) {
     const res = await fetch(url);
     if (res.ok) {
-        const $ = cheerio.load(await res.text());
+        const $ = load(await res.text());
         const text = $(".tytulnapis").text().split(" ");
         return {
             id: url?.substring(32) || "",
@@ -223,13 +220,13 @@ async function fetchTeachers(url: string) {
 async function cleanCollection(collection: string) {
     const docRef = await db.collection(collection).orderBy("createdAt", "desc").limit(1).get();
     if (docRef.docs.length == 1) {
-        let createdAt: admin.firestore.Timestamp = docRef.docs[0].get("createdAt");
+        let createdAt: Timestamp = docRef.docs[0].get("createdAt");
         const docsToDelete = await db.collection(collection).where("createdAt", "<", createdAt).get();
         docsToDelete.forEach(e => e.ref.delete());
-        functions.logger.info(docsToDelete);
+        logger.info(docsToDelete);
     }
     else {
-        functions.logger.error("nothing to clear");
+        logger.error("nothing to clear");
     }
 }
 
