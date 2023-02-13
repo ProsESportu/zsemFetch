@@ -75,7 +75,7 @@ export const ZsemPlan = functions
                     db.collection("TimeTableData").add({ timeTable: JSON.stringify(timeTable), createdAt: new Date() })
 
                 } else {
-                    functions.logger.warn(res.status, res.statusText)
+                    functions.logger.warn(res.status, res.statusText,await res.text())
 
                 }
             })
@@ -86,7 +86,7 @@ export const ZsemPlan = functions
                 }
 
             )
-        return
+        return true
     },
     );
 
@@ -133,14 +133,14 @@ export const substitutionFetch = functions
                             //response.send(result)
                         }
                         else {
-                            functions.logger.warn(res.status, res.statusText)
+                            functions.logger.warn(res.status, res.statusText,await res.text())
                         }
 
                     }).catch(e => {
                         functions.logger.error(e)
                     })
             }
-            return
+            return true
         }
     )
 export const idsFetch = functions
