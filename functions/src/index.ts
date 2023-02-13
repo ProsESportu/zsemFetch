@@ -1,4 +1,4 @@
-import { initializeApp } from "firebase-admin";
+import { initializeApp } from "firebase-admin/app";
 import { getFirestore, Timestamp } from "firebase-admin/firestore";
 import { RuntimeOptions, region, logger } from "firebase-functions/v1";
 import { load } from "cheerio";
