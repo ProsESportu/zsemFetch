@@ -212,7 +212,10 @@ async function fetchTeachers(url: string) {
             short: text[1]?.substring(1, 3) || ""
         };
     }
-    return;
+    else{
+        logger.warn(res.status,res.statusText)
+        return;
+    }
 }
 
 async function cleanCollection(collection: string) {
