@@ -13,7 +13,7 @@ const config: RuntimeOptions = { memory: "128MB", timeoutSeconds: 24, failurePol
 export const ZsemPlan = region("europe-central2")
     .runWith(config)
     .pubsub
-    .schedule("0 23,7,16 * * 1-5")
+    .schedule("0 23,7,16 * * *")
     .timeZone("Europe/Warsaw")
     .onRun(
         async (_ctx) => {
@@ -86,22 +86,22 @@ export const ZsemPlan = region("europe-central2")
 export const substitutionFetch = region("europe-central2")
     .runWith(config)
     .pubsub
-    .schedule("0 23,7,16 * * 1-5")
+    .schedule("0 23,7,16 * * *")
     .timeZone("Europe/Warsaw")
     .onRun(
         async (_ctx) => {
             const headers = new Headers()
             headers.append("Authorization", "Basic " + Buffer.from("zsem:123456").toString("base64"))
             const now = new Date()
-            const addresses=[]
+            const addresses = []
             for (let i = 0; i < 7; i++) {
                 const substitutionId = (now.getDate() + i).toString().padStart(2, "0") + (now.getMonth() + 1).toString().padStart(2, "0") + now.getFullYear();
                 const address = `https://zsem.edu.pl/zastepstwa/${substitutionId}.html`
                 addresses.push(address)
 
             }
-            const result= await Promise.all(addresses.map(e=>fetchSubstitutions(e,headers)))
-            const data={result,createdAt:now}
+            const result = (await Promise.all(addresses.map(e => fetchSubstitutions(e, headers)))).map(e => e || "err")
+            const data = { result, createdAt: now }
             db.collection("substitutions").add(data);
             return true
         }
@@ -109,7 +109,7 @@ export const substitutionFetch = region("europe-central2")
 export const idsFetch = region("europe-central2")
     .runWith(config)
     .pubsub
-    .schedule("0 23 * * 1-5")
+    .schedule("0 23 * * *")
     .timeZone("Europe/Warsaw")
     .onRun(
         async (_ctx) => {
@@ -127,7 +127,7 @@ export const idsFetch = region("europe-central2")
 export const firestoreClear = region("europe-central2")
     .runWith(config)
     .pubsub
-    .schedule("0 0 * * 1-5")
+    .schedule("0 0 * * *")
     .timeZone("Europe/Warsaw")
     .onRun(
         (_ctx) => {
@@ -169,8 +169,10 @@ interface subtitution {
 
 async function fetchSubstitutions(address: string, headers: Headers) {
     const res = await fetch(address,
-        { headers });
-
+        { headers }).catch(e => {
+            logger.warn(e);
+            throw e;
+        });
     if (res.ok && res.url == address) {
         const result: subtitution[] = [];
         const text = await res.text();
@@ -193,7 +195,7 @@ async function fetchSubstitutions(address: string, headers: Headers) {
 
         });
         result.splice(0, 2);
-        return {result,address};
+        return { result, address };
     }
     else {
         logger.warn(res.status, res.statusText, await res.text());
@@ -212,8 +214,8 @@ async function fetchTeachers(url: string) {
             short: text[1]?.substring(1, 3) || ""
         };
     }
-    else{
-        logger.warn(res.status,res.statusText)
+    else {
+        logger.warn(res.status, res.statusText)
         return;
     }
 }
