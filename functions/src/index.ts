@@ -133,7 +133,7 @@ export const firestoreClear = region("europe-central2")
         (_ctx) => {
             Promise.all([
                 cleanCollection("TimeTableData"),
-                cleanCollection("subtitutions"),
+                cleanCollection("substitutions"),
                 cleanCollection("teachers")
             ])
             return true
