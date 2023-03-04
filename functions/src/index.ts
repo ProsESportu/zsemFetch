@@ -10,102 +10,17 @@ const config: RuntimeOptions = { memory: "128MB", timeoutSeconds: 24, failurePol
 // // https://firebase.google.com/docs/functions/typescript
 //
 
-export const ZsemPlan = region("europe-central2")
+export const zsemFetch = region("europe-central2")
     .runWith(config)
     .pubsub
     .schedule("0 23,7,16 * * *")
     .timeZone("Europe/Warsaw")
     .onRun(
         async (_ctx) => {
-            const res = await fetch("https://zsem.edu.pl/plany/plany/o21.html")
-
-            if (res.ok) {
-                const text = await res.text();
-                const $ = load(text);
-                const table = $("table.tabela")
-                const rows = table.find("tr")
-                const columns: fullLesson[][][] = []
-                const times: string[] = []
-                rows.each((_i, row) => {
-                    const cells = $(row).find("td")
-                    times.push($(row).find("td.g").text())
-                    cells.each((i, cell) => {
-                        if (!columns[i]) {
-                            columns[i] = []
-                        }
-
-                        const obj: fullLesson[] = []
-                        const less = $(cell).find("span:has(a)")
-                        if (less.length === 0) {
-                            const lesson = $(cell).find("span.p").text()
-                            const teacher = {
-                                id: $(cell).find("a.n").attr("href") || "",
-                                short: $(cell).find("a.n").text()
-                            }
-                            const room = {
-                                id: $(cell).find("a.s").attr("href") || "",
-                                short: $(cell).find("a.s").text()
-                            }
-                            obj[0] = {
-                                lesson, teacher, room
-                            }
-                        }
-                        less.each((i, el) => {
-                            const lesson = $(el).find("span.p").text()
-                            const teacher = {
-                                id: $(el).find("a.n").attr("href") || "",
-                                short: $(el).find("a.n").text()
-                            }
-                            const room = {
-                                id: $(el).find("a.s").attr("href") || "",
-                                short: $(el).find("a.s").text()
-                            }
-                            obj[i] = {
-                                lesson, teacher, room
-                            }
-                        })
-                        columns[i].push(obj)
-                    })
-                })
-                times.shift()
-                const timeTable = columns.map(e => e.map((e, i) => {
-                    return { time: times[i], lessons: e }
-                }))
-                timeTable.splice(0, 2)
-                db.collection("TimeTableData").add({ timeTable: JSON.stringify(timeTable), createdAt: new Date() })
-
-            } else {
-                logger.warn(res.status, res.statusText, await res.text())
-
-            }
-
+            Promise.all([substitutionFetch,zsemPlan])
             return true
         },
     );
-
-export const substitutionFetch = region("europe-central2")
-    .runWith(config)
-    .pubsub
-    .schedule("0 23,7,16 * * *")
-    .timeZone("Europe/Warsaw")
-    .onRun(
-        async (_ctx) => {
-            const headers = new Headers()
-            headers.append("Authorization", "Basic " + Buffer.from("zsem:123456").toString("base64"))
-            const now = new Date()
-            const addresses = []
-            for (let i = 0; i < 7; i++) {
-                const substitutionId = (now.getDate() + i).toString().padStart(2, "0") + (now.getMonth() + 1).toString().padStart(2, "0") + now.getFullYear();
-                const address = `https://zsem.edu.pl/zastepstwa/${substitutionId}.html`
-                addresses.push(address)
-
-            }
-            const result = (await Promise.all(addresses.map(e => fetchSubstitutions(e, headers)))).map(e => e || "err")
-            const data = { result, createdAt: now }
-            db.collection("substitutions").add(data);
-            return true
-        }
-    )
 export const idsFetch = region("europe-central2")
     .runWith(config)
     .pubsub
@@ -165,6 +80,86 @@ interface subtitution {
     subctitute: string;
     reason: string;
     notes: string;
+}
+
+async function substitutionFetch() {
+    const headers = new Headers();
+    headers.append("Authorization", "Basic " + Buffer.from("zsem:123456").toString("base64"));
+    const now = new Date();
+    const addresses = [];
+    for (let i = 0; i < 7; i++) {
+        const substitutionId = (now.getDate() + i).toString().padStart(2, "0") + (now.getMonth() + 1).toString().padStart(2, "0") + now.getFullYear();
+        const address = `https://zsem.edu.pl/zastepstwa/${substitutionId}.html`;
+        addresses.push(address);
+
+    }
+    const result = (await Promise.all(addresses.map(e => fetchSubstitutions(e, headers)))).map(e => e || "err");
+    const data = { result, createdAt: now };
+    db.collection("substitutions").add(data);
+}
+
+async function zsemPlan() {
+    const res = await fetch("https://zsem.edu.pl/plany/plany/o21.html");
+
+    if (res.ok) {
+        const text = await res.text();
+        const $ = load(text);
+        const table = $("table.tabela");
+        const rows = table.find("tr");
+        const columns: fullLesson[][][] = [];
+        const times: string[] = [];
+        rows.each((_i, row) => {
+            const cells = $(row).find("td");
+            times.push($(row).find("td.g").text());
+            cells.each((i, cell) => {
+                if (!columns[i]) {
+                    columns[i] = [];
+                }
+
+                const obj: fullLesson[] = [];
+                const less = $(cell).find("span:has(a)");
+                if (less.length === 0) {
+                    const lesson = $(cell).find("span.p").text();
+                    const teacher = {
+                        id: $(cell).find("a.n").attr("href") || "",
+                        short: $(cell).find("a.n").text()
+                    };
+                    const room = {
+                        id: $(cell).find("a.s").attr("href") || "",
+                        short: $(cell).find("a.s").text()
+                    };
+                    obj[0] = {
+                        lesson, teacher, room
+                    };
+                }
+                less.each((i, el) => {
+                    const lesson = $(el).find("span.p").text();
+                    const teacher = {
+                        id: $(el).find("a.n").attr("href") || "",
+                        short: $(el).find("a.n").text()
+                    };
+                    const room = {
+                        id: $(el).find("a.s").attr("href") || "",
+                        short: $(el).find("a.s").text()
+                    };
+                    obj[i] = {
+                        lesson, teacher, room
+                    };
+                });
+                columns[i].push(obj);
+            });
+        });
+        times.shift();
+        const timeTable = columns.map(e => e.map((e, i) => {
+            return { time: times[i], lessons: e };
+        }));
+        timeTable.splice(0, 2);
+        db.collection("TimeTableData").add({ timeTable: JSON.stringify(timeTable), createdAt: new Date() });
+
+    } else {
+        logger.warn(res.status, res.statusText, await res.text());
+
+    }
 }
 
 async function fetchSubstitutions(address: string, headers: Headers) {
