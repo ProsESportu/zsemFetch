@@ -17,7 +17,7 @@ export const zsemFetch = region("europe-central2")
     .timeZone("Europe/Warsaw")
     .onRun(
         async (_ctx) => {
-            Promise.all([substitutionFetch,zsemPlan])
+            Promise.all([substitutionFetch(),zsemPlan()])
             return true
         },
     );
